@@ -38,6 +38,9 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await res.json()
+    // Log raw response to help debug format
+    console.log('[Evolution API] raw response keys:', JSON.stringify(Object.keys(data)))
+    console.log('[Evolution API] raw response (truncated):', JSON.stringify(data).slice(0, 500))
     return NextResponse.json(data)
   } catch (err) {
     return NextResponse.json(
