@@ -8,32 +8,32 @@ export async function GET(req: NextRequest) {
   const phone = req.nextUrl.searchParams.get('phone') || '5511999999999'
   const digits = phone.replace(/\D/g, '')
   const base = digits.startsWith('55') ? digits : `55${digits}`
+  const jid = `${base}@s.whatsapp.net`
 
-  const candidates: string[] = [base]
-  if (base.length === 13) {
-    candidates.push(base.slice(0, 4) + base.slice(5))
-  } else if (base.length === 12) {
-    candidates.push(base.slice(0, 4) + '9' + base.slice(4))
-  }
+  const bodies = [
+    { label: 'remoteJid_direct', body: { where: { remoteJid: jid }, limit: 3 } },
+    { label: 'key_remoteJid', body: { where: { key: { remoteJid: jid } }, limit: 3 } },
+    { label: 'number_only', body: { number: base, limit: 3 } },
+    { label: 'no_filter', body: { limit: 3 } },
+  ]
 
   const results: Record<string, unknown> = {}
 
-  for (const num of candidates) {
-    const jid = `${num}@s.whatsapp.net`
+  for (const { label, body } of bodies) {
     try {
       const res = await fetch(`${API_URL}/chat/findMessages/${INSTANCE}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: API_KEY! },
-        body: JSON.stringify({ where: { key: { remoteJid: jid } }, limit: 3 }),
+        body: JSON.stringify(body),
       })
       const text = await res.text()
       let parsed: unknown
       try { parsed = JSON.parse(text) } catch { parsed = text }
-      results[jid] = { status: res.status, data: parsed }
+      results[label] = { status: res.status, data: parsed }
     } catch (err) {
-      results[jid] = { error: String(err) }
+      results[label] = { error: String(err) }
     }
   }
 
-  return NextResponse.json(results)
+  return NextResponse.json({ jid, results })
 }

@@ -4,53 +4,62 @@ const API_URL = process.env.EVOLUTION_API_URL
 const API_KEY = process.env.EVOLUTION_API_KEY
 const INSTANCE = process.env.EVOLUTION_INSTANCE
 
+// Evolution API v2 (Prisma/PostgreSQL) stores remoteJid directly on the message record.
+// Try multiple query formats and return first that has results.
+const QUERY_FORMATS = [
+  // Format 1: remoteJid direct (v2 Prisma schema)
+  (jid: string) => ({ where: { remoteJid: jid }, limit: 60 }),
+  // Format 2: nested under key (older format)
+  (jid: string) => ({ where: { key: { remoteJid: jid } }, limit: 60 }),
+  // Format 3: just number field
+  (jid: string) => ({ number: jid.replace('@s.whatsapp.net', ''), limit: 60 }),
+]
+
+async function fetchMessages(jid: string): Promise<unknown[]> {
+  for (const buildBody of QUERY_FORMATS) {
+    const res = await fetch(`${API_URL}/chat/findMessages/${INSTANCE}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: API_KEY! },
+      body: JSON.stringify(buildBody(jid)),
+    })
+    if (!res.ok) continue
+    const data = await res.json()
+
+    // Extract records from any known response shape
+    const records: unknown[] =
+      Array.isArray(data) ? data :
+      Array.isArray(data?.messages?.records) ? data.messages.records :
+      Array.isArray(data?.records) ? data.records :
+      Array.isArray(data?.messages) ? data.messages :
+      []
+
+    if (records.length > 0) return records
+  }
+  return []
+}
+
 export async function POST(req: NextRequest) {
   const { phone } = await req.json()
-
-  if (!phone) {
-    return NextResponse.json({ error: 'phone is required' }, { status: 400 })
-  }
+  if (!phone) return NextResponse.json({ error: 'phone is required' }, { status: 400 })
 
   const digits = phone.replace(/\D/g, '')
   const base = digits.startsWith('55') ? digits : `55${digits}`
 
-  // Brazilian numbers: try both with and without the 9th digit
-  // e.g. 5543984278638 and 554384278638
+  // Try both Brazilian number formats (with and without the 9th digit)
   const candidates: string[] = [base]
   if (base.length === 13) {
-    // Has 9-digit local number — also try without the 9
-    const without9 = base.slice(0, 4) + base.slice(5)
-    candidates.push(without9)
+    candidates.push(base.slice(0, 4) + base.slice(5))   // remove 9
   } else if (base.length === 12) {
-    // Has 8-digit local number — also try with the 9
-    const with9 = base.slice(0, 4) + '9' + base.slice(4)
-    candidates.push(with9)
-  }
-
-  const fetchForJid = async (jid: string) => {
-    const res = await fetch(`${API_URL}/chat/findMessages/${INSTANCE}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: API_KEY! },
-      body: JSON.stringify({ where: { key: { remoteJid: jid } }, limit: 60 }),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    return (data?.messages?.records as unknown[]) || []
+    candidates.push(base.slice(0, 4) + '9' + base.slice(4)) // add 9
   }
 
   try {
-    let records: unknown[] = []
-
     for (const num of candidates) {
       const jid = `${num}@s.whatsapp.net`
-      const result = await fetchForJid(jid)
-      if (result && result.length > 0) {
-        records = result
-        break
-      }
+      const records = await fetchMessages(jid)
+      if (records.length > 0) return NextResponse.json(records)
     }
-
-    return NextResponse.json(records)
+    return NextResponse.json([])
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Erro ao buscar mensagens' },
