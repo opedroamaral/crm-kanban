@@ -3,31 +3,40 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Send, Loader2, RefreshCw, AlertCircle } from 'lucide-react'
 
-type Message = {
-  key: {
-    id: string
-    fromMe: boolean
-    remoteJid: string
-  }
-  message?: {
-    conversation?: string
-    extendedTextMessage?: { text: string }
-    imageMessage?: { caption?: string }
-    audioMessage?: Record<string, unknown>
-    documentMessage?: { fileName?: string }
-  }
-  messageTimestamp: number
-  messageType?: string
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Message = Record<string, any>
 
-function extractText(msg: Message): string {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractText(msg: any): string {
+  // Try top-level text fields first (some Evolution versions flatten the structure)
+  if (msg.body) return msg.body
+  if (msg.text) return msg.text
+  if (msg.content) return msg.content
+
   const m = msg.message
   if (!m) return ''
+
+  // Standard Baileys message types
   if (m.conversation) return m.conversation
   if (m.extendedTextMessage?.text) return m.extendedTextMessage.text
-  if (m.imageMessage) return m.imageMessage.caption || '📷 Imagem'
+  if (m.imageMessage?.caption) return m.imageMessage.caption
+  if (m.imageMessage) return '📷 Imagem'
+  if (m.videoMessage?.caption) return m.videoMessage.caption
+  if (m.videoMessage) return '🎥 Vídeo'
   if (m.audioMessage) return '🎵 Áudio'
+  if (m.stickerMessage) return '🎨 Sticker'
   if (m.documentMessage) return `📄 ${m.documentMessage.fileName || 'Documento'}`
+  if (m.locationMessage) return '📍 Localização'
+  if (m.contactMessage) return `👤 Contato: ${m.contactMessage.displayName || ''}`
+  if (m.buttonsResponseMessage?.selectedDisplayText) return m.buttonsResponseMessage.selectedDisplayText
+  if (m.listResponseMessage?.title) return m.listResponseMessage.title
+  if (m.templateButtonReplyMessage?.selectedDisplayText) return m.templateButtonReplyMessage.selectedDisplayText
+  if (m.reactionMessage?.text) return `Reagiu: ${m.reactionMessage.text}`
+
+  // Fallback: find any string value in the message object
+  const firstString = Object.values(m).find((v) => typeof v === 'string' && v.length > 0)
+  if (firstString) return firstString as string
+
   return '📎 Mídia'
 }
 
@@ -174,14 +183,17 @@ export function ChatPanel({ phone, leadName }: Props) {
           </div>
         )}
 
-        {messages.map((msg) => {
-          const isMe = msg.key.fromMe
+        {messages.map((msg, i) => {
+          // fromMe can live in key.fromMe or directly on the message
+          const isMe = msg?.key?.fromMe ?? msg?.fromMe ?? false
           const content = extractText(msg)
           if (!content) return null
+          const msgId = msg?.key?.id || msg?.id || `msg-${i}`
+          const msgTs = msg?.messageTimestamp || msg?.timestamp || 0
 
           return (
             <div
-              key={msg.key.id}
+              key={msgId}
               className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
             >
               <div
@@ -198,7 +210,7 @@ export function ChatPanel({ phone, leadName }: Props) {
                 )}
                 <p className="leading-relaxed whitespace-pre-wrap break-words">{content}</p>
                 <p className="text-[10px] text-gray-400 text-right mt-0.5">
-                  {formatTime(msg.messageTimestamp)}
+                  {formatTime(msgTs)}
                 </p>
               </div>
             </div>
