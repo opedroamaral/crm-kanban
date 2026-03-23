@@ -67,21 +67,8 @@ export function ChatPanel({ phone, leadName }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erro ao buscar mensagens')
 
-      // Evolution API can return many shapes — find the array wherever it is
-      let msgs: Message[] = []
-      if (Array.isArray(data)) {
-        msgs = data
-      } else if (Array.isArray(data?.messages)) {
-        msgs = data.messages
-      } else if (Array.isArray(data?.records)) {
-        msgs = data.records
-      } else if (Array.isArray(data?.data)) {
-        msgs = data.data
-      } else {
-        // Last resort: find first array value in the response object
-        const firstArray = Object.values(data as Record<string, unknown>).find(Array.isArray)
-        msgs = (firstArray as Message[]) || []
-      }
+      // API route already normalizes to a flat array
+      const msgs: Message[] = Array.isArray(data) ? data : []
 
       const sorted = [...msgs].sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0))
       setMessages(sorted)

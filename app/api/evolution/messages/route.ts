@@ -11,37 +11,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'phone is required' }, { status: 400 })
   }
 
-  // Format: 5511999999999@s.whatsapp.net
   const digits = phone.replace(/\D/g, '')
-  const remoteJid = digits.startsWith('55')
-    ? `${digits}@s.whatsapp.net`
-    : `55${digits}@s.whatsapp.net`
+  const base = digits.startsWith('55') ? digits : `55${digits}`
 
-  try {
+  // Brazilian numbers: try both with and without the 9th digit
+  // e.g. 5543984278638 and 554384278638
+  const candidates: string[] = [base]
+  if (base.length === 13) {
+    // Has 9-digit local number — also try without the 9
+    const without9 = base.slice(0, 4) + base.slice(5)
+    candidates.push(without9)
+  } else if (base.length === 12) {
+    // Has 8-digit local number — also try with the 9
+    const with9 = base.slice(0, 4) + '9' + base.slice(4)
+    candidates.push(with9)
+  }
+
+  const fetchForJid = async (jid: string) => {
     const res = await fetch(`${API_URL}/chat/findMessages/${INSTANCE}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: API_KEY!,
-      },
-      body: JSON.stringify({
-        where: {
-          key: { remoteJid },
-        },
-        limit: 50,
-      }),
+      headers: { 'Content-Type': 'application/json', apikey: API_KEY! },
+      body: JSON.stringify({ where: { key: { remoteJid: jid } }, limit: 60 }),
     })
+    if (!res.ok) return null
+    const data = await res.json()
+    return (data?.messages?.records as unknown[]) || []
+  }
 
-    if (!res.ok) {
-      const text = await res.text()
-      return NextResponse.json({ error: text }, { status: res.status })
+  try {
+    let records: unknown[] = []
+
+    for (const num of candidates) {
+      const jid = `${num}@s.whatsapp.net`
+      const result = await fetchForJid(jid)
+      if (result && result.length > 0) {
+        records = result
+        break
+      }
     }
 
-    const data = await res.json()
-    // Log raw response to help debug format
-    console.log('[Evolution API] raw response keys:', JSON.stringify(Object.keys(data)))
-    console.log('[Evolution API] raw response (truncated):', JSON.stringify(data).slice(0, 500))
-    return NextResponse.json(data)
+    return NextResponse.json(records)
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Erro ao buscar mensagens' },
