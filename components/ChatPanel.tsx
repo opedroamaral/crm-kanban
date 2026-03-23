@@ -62,10 +62,13 @@ export function ChatPanel({ phone, leadName }: Props) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const lastCountRef = useRef<number>(0)
+  const isAtBottomRef = useRef<boolean>(true)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  const fetchMessages = useCallback(async () => {
+  const fetchMessages = useCallback(async (silent = false) => {
     if (!phone) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const res = await fetch('/api/evolution/messages', {
@@ -76,24 +79,44 @@ export function ChatPanel({ phone, leadName }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erro ao buscar mensagens')
 
-      // API route already normalizes to a flat array
       const msgs: Message[] = Array.isArray(data) ? data : []
-
       const sorted = [...msgs].sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0))
-      setMessages(sorted)
+
+      setMessages((prev) => {
+        // Only update and scroll if there are new messages
+        if (sorted.length !== lastCountRef.current) {
+          lastCountRef.current = sorted.length
+          return sorted
+        }
+        return prev
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao carregar conversa')
+      if (!silent) setError(err instanceof Error ? err.message : 'Erro ao carregar conversa')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [phone])
 
+  // Initial load
   useEffect(() => {
+    lastCountRef.current = 0
     fetchMessages()
   }, [fetchMessages])
 
+  // Polling every 4 seconds
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const interval = setInterval(() => fetchMessages(true), 4000)
+    return () => clearInterval(interval)
+  }, [fetchMessages])
+
+  // Scroll to bottom only when new messages arrive and user is already at bottom
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80
+    if (isNearBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages])
 
   const handleSend = async () => {
@@ -152,7 +175,7 @@ export function ChatPanel({ phone, leadName }: Props) {
           Conversa WhatsApp
         </span>
         <button
-          onClick={fetchMessages}
+          onClick={() => fetchMessages()}
           disabled={loading}
           className="p-1 rounded text-gray-400 hover:text-gray-600 transition-colors"
           title="Atualizar"
@@ -162,7 +185,7 @@ export function ChatPanel({ phone, leadName }: Props) {
       </div>
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto bg-[#ece5dd] rounded-xl p-3 space-y-2 min-h-[240px] max-h-[340px]">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-[#ece5dd] rounded-xl p-3 space-y-2 min-h-[240px] max-h-[340px]">
         {loading && messages.length === 0 && (
           <div className="flex items-center justify-center h-20 gap-2 text-gray-500 text-xs">
             <Loader2 size={14} className="animate-spin" />
